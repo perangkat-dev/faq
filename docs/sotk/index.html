@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Bagan Organisasi - Popup Editor (Fix All)</title>
+<!-- Library untuk export PNG dan PDF -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f5f5f5;
+    margin: 0;
+    padding: 40px 240px 240px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 1600px;
+  }
+
+  /* ===== FLOATING ACTION BUTTON — RADIAL MENU (pojok kanan bawah) ===== */
+  .fab-container {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 60px;
+    height: 60px;
+    z-index: 999;
+  }
+
+  .fab-main {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #2E86AB, #1a5f7a);
+    border: none;
+    color: #fff;
+    font-size: 26px;
+    font-weight: 300;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.28);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 10;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .fab-main:hover {
+    box-shadow: 0 8px 22px rgba(0,0,0,0.34);
+  }
+
+  .fab-main.active {
+    transform: rotate(45deg);
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+  }
+
+  /* Titik asal kipas: sudut kanan-bawah container, sama seperti fab-main */
+  .fab-menu {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+
+  .fab-item {
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    border: none;
+    color: #fff;
+    font-size: 19px;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.22);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(0, 0) scale(0.3);
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
+  }
+
+  .fab-item:hover {
+    filter: brightness(1.12);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.32);
+  }
+
+  /* Kipas 90° dari arah kanan-bawah menyebar ke kiri lalu ke atas, 6 item @18° */
+  .fab-menu.active .fab-item {
+    opacity: 1;
+    pointer-events: all;
+  }
+  .fab-menu.active .fab-item:nth-child(1) { transform: translate(-190px, 0) scale(1); transition-delay: 0.02s; }
+  .fab-menu.active .fab-item:nth-child(2) { transform: translate(-180.7px, -58.7px) scale(1); transition-delay: 0.06s; }
+  .fab-menu.active .fab-item:nth-child(3) { transform: translate(-153.7px, -111.7px) scale(1); transition-delay: 0.10s; }
+  .fab-menu.active .fab-item:nth-child(4) { transform: translate(-111.7px, -153.7px) scale(1); transition-delay: 0.14s; }
+  .fab-menu.active .fab-item:nth-child(5) { transform: translate(-58.7px, -180.7px) scale(1); transition-delay: 0.18s; }
+  .fab-menu.active .fab-item:nth-child(6) { transform: translate(0, -190px) scale(1); transition-delay: 0.22s; }
+
+  /* Label selalu muncul di BAWAH setiap tombol (arah aman, tidak menabrak tombol lain di kipas) */
+  .fab-item .tooltip {
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.82);
+    color: #fff;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 100;
+  }
+  .fab-item:hover .tooltip {
+    opacity: 1;
+  }
+
+  .fab-export { background: #2E86AB; }
+  .fab-import { background: #1D9E75; }
+  .fab-reset  { background: #f39c12; }
+  .fab-add    { background: #9b59b6; }
+  .fab-png    { background: #e67e22; }
+  .fab-pdf    { background: #c0392b; }
+
+  /* ===== KOTAK ===== */
+  .box {
+    width: 170px;
+    border: 1px solid #000;
+    background: #fff;
+    text-align: center;
+    position: relative;
+    cursor: pointer;
+    transition: box-shadow 0.2s ease;
+  }
+  .box:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+  .box .jabatan {
+    font-weight: bold;
+    font-size: 14px;
+    min-height: 34px;
+    line-height: 1.25;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 6px;
+    border-bottom: 1px solid #000;
+    position: relative;
+    box-sizing: border-box;
+  }
+  .box .nama {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    font-size: 13px;
+    color: #000;
+  }
+  .box.sub .jabatan {
+    font-size: 12px;
+  }
+  .box.sub .nama {
+    height: 30px;
+    font-size: 12px;
+  }
+
+  /* Kotak Anggota: daftar nama di bawah Sub Klaster, terhubung garis komando (bukan koordinatif) */
+  .box.anggota .jabatan {
+    font-size: 11px;
+    height: 24px;
+    color: #fff;
+  }
+  .box.anggota .nama {
+    height: auto;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    padding: 6px 8px;
+    font-size: 11px;
+    line-height: 16px;
+    gap: 0;
+  }
+  .box.anggota .nama div {
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  /* Tombol aksi di pojok kotak */
+  .box-actions {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    display: none;
+    gap: 4px;
+    z-index: 20;
+  }
+  .box:hover .box-actions {
+    display: flex;
+  }
+  .box-actions button {
+    width: 22px;
+    height: 22px;
+    border: 1px solid #000;
+    border-radius: 50%;
+    font-size: 12px;
+    line-height: 18px;
+    text-align: center;
+    cursor: pointer;
+    padding: 0;
+    color: #fff;
+    font-weight: bold;
+  }
+  .btn-edit { background: #2E86AB; }
+  .btn-edit:hover { background: #1a5f7a; }
+  .btn-delete { background: #e74c3c; }
+  .btn-delete:hover { background: #c0392b; }
+
+  .btn-add-sub {
+    margin-top: 8px;
+    background: #2E86AB;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    display: none;
+  }
+  .branch:hover .btn-add-sub {
+    display: inline-block;
+  }
+  .btn-add-sub:hover {
+    background: #1a5f7a;
+  }
+
+  /* ===== GARIS ===== */
+  .connector-vertical {
+    width: 1px;
+    height: 30px;
+    background: #555;
+    flex-shrink: 0;
+  }
+
+  /* ===== AREA BAGAN ===== */
+  .chart {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    width: 100%;
+    padding: 20px 80px 120px 80px;
+  }
+
+  .chart-title {
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+    text-transform: uppercase;
+    margin-bottom: 30px;
+    color: #000;
+    cursor: pointer;
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 6px;
+    transition: background 0.2s ease;
+  }
+  .chart-title:hover {
+    background: rgba(0,0,0,0.05);
+  }
+
+  /* ===== POPUP / MODAL ===== */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+  }
+  .modal-overlay.active {
+    display: flex;
+  }
+  .modal {
+    background: #fff;
+    border-radius: 12px;
+    padding: 30px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    animation: modalIn 0.3s ease;
+  }
+  @keyframes modalIn {
+    from { transform: scale(0.8); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  .modal h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    text-align: center;
+    color: #333;
+  }
+  .modal label {
+    display: block;
+    font-weight: bold;
+    margin-top: 12px;
+    margin-bottom: 4px;
+    font-size: 13px;
+    color: #555;
+  }
+  .modal input[type="text"] {
+    width: 100%;
+    padding: 8px 12px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: border 0.3s;
+  }
+  .modal input[type="text"]:focus {
+    border-color: #2E86AB;
+    outline: none;
+  }
+  .modal .color-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 4px;
+  }
+  .modal .color-row input[type="color"] {
+    width: 50px;
+    height: 50px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 2px;
+  }
+  .modal .color-row span {
+    font-size: 13px;
+    color: #666;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+    justify-content: flex-end;
+  }
+  .modal-actions button {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  .modal-actions .btn-save { background: #2E86AB; color: #fff; }
+  .modal-actions .btn-save:hover { background: #1a5f7a; }
+  .modal-actions .btn-close { background: #e74c3c; color: #fff; }
+  .modal-actions .btn-close:hover { background: #c0392b; }
+
+  /* Loading overlay untuk export */
+  .loading-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    z-index: 2000;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    color: #fff;
+  }
+  .loading-overlay.active {
+    display: flex;
+  }
+  .loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #f3f3f3;
+    border-top: 5px solid #2E86AB;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+  }
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="chart" id="chartContainer"></div>
+</div>
+
+<!-- ===== FLOATING ACTION BUTTON ===== -->
+<div class="fab-container">
+  <div class="fab-menu" id="fabMenu">
+    <button class="fab-item fab-export" onclick="openExportDataModal()">
+      📥
+      <span class="tooltip">Export Data</span>
+    </button>
+    <button class="fab-item fab-import" onclick="openImportDataModal()">
+      📤
+      <span class="tooltip">Import Data</span>
+    </button>
+    <button class="fab-item fab-reset" onclick="resetData()">
+      🔄
+      <span class="tooltip">Reset Data</span>
+    </button>
+    <button class="fab-item fab-add" onclick="addKlaster()">
+      ➕
+      <span class="tooltip">Tambah Klaster</span>
+    </button>
+    <button class="fab-item fab-png" onclick="exportPNG()">
+      🖼️
+      <span class="tooltip">Export PNG</span>
+    </button>
+    <button class="fab-item fab-pdf" onclick="openExportOrientModal()">
+      📄
+      <span class="tooltip">Export PDF</span>
+    </button>
+  </div>
+  <button class="fab-main" id="fabMain" onclick="toggleFabMenu()">+</button>
+</div>
+
+<!-- ===== MODAL POPUP ===== -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h3 id="modalTitle">Edit Kotak</h3>
+    
+    <label id="labelJabatan">Jabatan</label>
+    <input type="text" id="editJabatan" placeholder="Masukkan jabatan...">
+    
+    <label id="labelNama">Nama</label>
+    <input type="text" id="editNama" placeholder="Masukkan nama...">
+
+    <div id="groupAnggota" style="display:none;">
+      <label>Anggota (satu nama per baris, kosongkan jika tidak ada)</label>
+      <textarea id="editAnggota" rows="4" placeholder="Contoh:&#10;Budi&#10;Sari&#10;Joko" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid #ccc; border-radius:4px; font-family:inherit; font-size:14px; resize:vertical;"></textarea>
+    </div>
+    
+    <label>Warna</label>
+    <div class="color-row">
+      <input type="color" id="editWarna">
+      <span>Pilih warna untuk bagian ini</span>
+    </div>
+    
+    <div class="modal-actions">
+      <button class="btn-close" onclick="closeModal()">Tutup</button>
+      <button class="btn-save" onclick="saveModal()">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Edit Kepala Bagan (Judul, Subtitle, Tahun) -->
+<div class="modal-overlay" id="headerModalOverlay">
+  <div class="modal">
+    <h3>✎ Edit Kepala Bagan</h3>
+
+    <label>Judul</label>
+    <input type="text" id="editHeaderTitle" placeholder="Contoh: Bagan Organisasi Puskesmas Kedawung">
+
+    <label>Subtitle</label>
+    <input type="text" id="editHeaderSubtitle" placeholder="Contoh: Kabupaten Cirebon">
+
+    <label>Tahun</label>
+    <input type="text" id="editHeaderTahun" placeholder="Contoh: Tahun 2026">
+
+    <div class="modal-actions">
+      <button class="btn-close" onclick="closeHeaderModal()">Tutup</button>
+      <button class="btn-save" onclick="saveHeaderModal()">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+  <div>Sedang export... Mohon tunggu</div>
+</div>
+
+<!-- Modal Pilih Orientasi Kertas (PDF) -->
+<div class="modal-overlay" id="exportOrientOverlay">
+  <div class="modal" style="max-width: 340px;">
+    <h3>Pilih Orientasi Kertas</h3>
+    <div style="display:flex; gap:16px; justify-content:center; margin-top:10px;">
+      <button onclick="chooseOrientation('p')" style="flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; padding:16px 10px; border:2px solid #ddd; border-radius:8px; background:#fff; cursor:pointer;">
+        <div style="width:34px; height:46px; border:2px solid #2E86AB; border-radius:2px;"></div>
+        <span style="font-size:13px; font-weight:bold; color:#333;">Potrait</span>
+      </button>
+      <button onclick="chooseOrientation('l')" style="flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; padding:16px 10px; border:2px solid #ddd; border-radius:8px; background:#fff; cursor:pointer;">
+        <div style="width:46px; height:34px; border:2px solid #2E86AB; border-radius:2px;"></div>
+        <span style="font-size:13px; font-weight:bold; color:#333;">Landscape</span>
+      </button>
+    </div>
+    <div class="modal-actions" style="justify-content:center;">
+      <button class="btn-close" onclick="closeExportOrient()">Batal</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept=".json" style="display:none" onchange="handleImport(event)">
+<input type="file" id="fileInputExcel" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImportExcel(event)">
+
+<!-- Modal Pilih Format Export -->
+<div class="modal-overlay" id="exportDataOverlay">
+  <div class="modal" style="max-width: 340px;">
+    <h3>Export Data</h3>
+    <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+      <button onclick="chooseExportType('json')" style="padding:14px; border:2px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; text-align:left; font-size:14px;">
+        <strong>📄 Export JSON</strong><br>
+        <span style="font-size:12px; color:#666;">Format teknis, cocok untuk backup/cadangan data</span>
+      </button>
+      <button onclick="chooseExportType('excel')" style="padding:14px; border:2px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; text-align:left; font-size:14px;">
+        <strong>📊 Export Excel (.xlsx)</strong><br>
+        <span style="font-size:12px; color:#666;">Bisa dibuka & diedit di Excel, mudah dibagikan ke rekan kerja</span>
+      </button>
+    </div>
+    <div class="modal-actions" style="justify-content:center;">
+      <button class="btn-close" onclick="closeExportData()">Batal</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Pilih Format Import -->
+<div class="modal-overlay" id="importDataOverlay">
+  <div class="modal" style="max-width: 340px;">
+    <h3>Import Data</h3>
+    <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+      <button onclick="chooseImportType('json')" style="padding:14px; border:2px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; text-align:left; font-size:14px;">
+        <strong>📄 Import JSON</strong><br>
+        <span style="font-size:12px; color:#666;">Dari file backup JSON aplikasi ini</span>
+      </button>
+      <button onclick="chooseImportType('excel')" style="padding:14px; border:2px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; text-align:left; font-size:14px;">
+        <strong>📊 Import Excel/CSV</strong><br>
+        <span style="font-size:12px; color:#666;">Dari file .xlsx atau .csv yang diisi rekan kerja. Ini akan mengganti seluruh Klaster/Sub/Anggota yang ada.</span>
+      </button>
+    </div>
+    <div class="modal-actions" style="justify-content:center;">
+      <button class="btn-close" onclick="closeImportData()">Batal</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// DATA
+// ============================================================
+let data = {
+  title: "Bagan Organisasi Puskesmas Kedawung",
+  subtitle: "Kabupaten Cirebon",
+  tahun: "Tahun 2026",
+  root: {
+    jabatan: "KEPALA PUSKESMAS",
+    nama: "Nama Kapus",
+    warna: "#e6f425"
+  },
+  klaster: [
+    {
+      nama: "KLASTER MANAJEMEN",
+      kepala: "Nama",
+      warna: "#f7fb2d",
+      sub: [
+        { nama: "Manajemen Inti", kepala: "Nama", warna: "#f7fb2d", anggota: [] }
+      ],
+      id: 1
+    },
+    {
+      nama: "KLASTER IBU DAN ANAK",
+      kepala: "Nama",
+      warna: "#f4511a",
+      sub: [
+        { nama: "Ibu Hamil, Bersalin, Nifas", kepala: "Nama", warna: "#f4511a", anggota: [] }
+      ],
+      id: 2
+    },
+    {
+      nama: "KLASTER USIA DEWASA DAN LANSIA",
+      kepala: "Nama",
+      warna: "#05d9f5",
+      sub: [
+        { nama: "Usia Dewasa", kepala: "Nama", warna: "#05d9f5", anggota: [] }
+      ],
+      id: 3
+    },
+    {
+      nama: "KLASTER PENANGGULANGAN PENYAKIT MENULAR",
+      kepala: "Nama",
+      warna: "#13dd2b",
+      sub: [
+        { nama: "Kesehatan Lingkungan", kepala: "Nama", warna: "#13dd2b", anggota: [] }
+      ],
+      id: 4
+    },
+    {
+      nama: "Lintas Klaster",
+      kepala: "Nama",
+      warna: "#90f9d8",
+      sub: [
+        { nama: "Pelayanan Kesehatan Gigi dan Mulut", kepala: "Nama", warna: "#90f9d8", anggota: [] }
+      ],
+      id: 5
+    }
+  ]
+};
+
+let nextKlasterId = 6;
+let modalTarget = null;
+
+// ============================================================
+// FLOATING ACTION BUTTON
+// ============================================================
+function toggleFabMenu() {
+  const fabMain = document.getElementById('fabMain');
+  const fabMenu = document.getElementById('fabMenu');
+  
+  fabMain.classList.toggle('active');
+  fabMenu.classList.toggle('active');
+}
+
+document.addEventListener('click', function(e) {
+  const fabContainer = document.querySelector('.fab-container');
+  if (!fabContainer.contains(e.target)) {
+    const fabMain = document.getElementById('fabMain');
+    const fabMenu = document.getElementById('fabMenu');
+    fabMain.classList.remove('active');
+    fabMenu.classList.remove('active');
+  }
+});
+
+// ============================================================
+// EXPORT PNG (DIPERBAIKI)
+// ============================================================
+async function exportPNG() {
+  toggleFabMenu();
+  const loading = document.getElementById('loadingOverlay');
+  loading.classList.add('active');
+  const chartElement = document.getElementById('chartContainer');
+  const originalWidth = chartElement.style.width;
+  
+  try {
+    // Scroll ke atas dulu untuk memastikan semua konten ter-render
+    window.scrollTo(0, 0);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Paksa kontainer melebar sesuai ukuran konten aslinya (bukan lebar jendela/viewport)
+    // supaya Klaster 1 dan klaster terakhir tidak kepotong saat konten lebih lebar dari jendela.
+    chartElement.style.width = 'max-content';
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const canvas = await html2canvas(chartElement, {
+      scale: 2,
+      backgroundColor: '#f5f5f5',
+      logging: false,
+      useCORS: true,
+      allowTaint: true,
+      scrollX: 0,
+      scrollY: -window.scrollY,
+      windowWidth: chartElement.scrollWidth,
+      windowHeight: chartElement.scrollHeight,
+      ignoreElements: (element) => {
+        // Abaikan tombol-tombol yang tidak perlu di export
+        if (element.classList.contains('box-actions') || 
+            element.classList.contains('btn-add-sub') ||
+            element.classList.contains('fab-container')) {
+          return true;
+        }
+        return false;
+      }
+    });
+    
+    const link = document.createElement('a');
+    link.download = `bagan-organisasi-${new Date().toISOString().split('T')[0]}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  } catch (error) {
+    console.error('Error export PNG:', error);
+    alert('Terjadi kesalahan saat export PNG');
+  } finally {
+    chartElement.style.width = originalWidth;
+    loading.classList.remove('active');
+  }
+}
+
+// ============================================================
+// PILIH ORIENTASI KERTAS SEBELUM EXPORT PDF
+// ============================================================
+function openExportOrientModal() {
+  toggleFabMenu();
+  document.getElementById('exportOrientOverlay').classList.add('active');
+}
+
+function closeExportOrient() {
+  document.getElementById('exportOrientOverlay').classList.remove('active');
+}
+
+function chooseOrientation(orientation) {
+  closeExportOrient();
+  exportPDF(orientation);
+}
+
+// ============================================================
+// PILIH FORMAT EXPORT / IMPORT DATA (JSON vs Excel/CSV)
+// ============================================================
+function openExportDataModal() {
+  toggleFabMenu();
+  document.getElementById('exportDataOverlay').classList.add('active');
+}
+function closeExportData() {
+  document.getElementById('exportDataOverlay').classList.remove('active');
+}
+function chooseExportType(type) {
+  closeExportData();
+  if (type === 'json') exportJSON();
+  else exportExcel();
+}
+
+function openImportDataModal() {
+  toggleFabMenu();
+  document.getElementById('importDataOverlay').classList.add('active');
+}
+function closeImportData() {
+  document.getElementById('importDataOverlay').classList.remove('active');
+}
+function chooseImportType(type) {
+  closeImportData();
+  if (type === 'json') document.getElementById('fileInput').click();
+  else document.getElementById('fileInputExcel').click();
+}
+
+// ============================================================
+// EXPORT PDF (DIPERBAIKI)
+// ============================================================
+async function exportPDF(orientation) {
+  const loading = document.getElementById('loadingOverlay');
+  loading.classList.add('active');
+  const chartElement = document.getElementById('chartContainer');
+  const originalWidth = chartElement.style.width;
+  
+  try {
+    const { jsPDF } = window.jspdf;
+    
+    // Scroll ke atas dulu
+    window.scrollTo(0, 0);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Paksa kontainer melebar sesuai ukuran konten aslinya (bukan lebar jendela/viewport)
+    // supaya Klaster 1 dan klaster terakhir tidak kepotong saat konten lebih lebar dari jendela.
+    chartElement.style.width = 'max-content';
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    const canvas = await html2canvas(chartElement, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      logging: false,
+      useCORS: true,
+      allowTaint: true,
+      scrollX: 0,
+      scrollY: -window.scrollY,
+      windowWidth: chartElement.scrollWidth,
+      windowHeight: chartElement.scrollHeight,
+      ignoreElements: (element) => {
+        // Abaikan tombol-tombol yang tidak perlu di export
+        if (element.classList.contains('box-actions') || 
+            element.classList.contains('btn-add-sub') ||
+            element.classList.contains('fab-container')) {
+          return true;
+        }
+        return false;
+      }
+    });
+    
+    const imgData = canvas.toDataURL('image/png');
+    
+    // Hitung ukuran yang tepat untuk PDF
+    const imgWidth = canvas.width;
+    const imgHeight = canvas.height;
+    
+    // Orientasi kertas mengikuti pilihan pengguna (potrait/landscape).
+    // Ukuran gambar tetap disesuaikan otomatis (auto-fit) ke halaman yang dipilih.
+    const pdf = new jsPDF(orientation, 'mm', 'a4');
+    
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    
+    // Hitung rasio untuk fit ke halaman
+    const ratio = Math.min(
+      (pdfWidth - 20) / imgWidth, 
+      (pdfHeight - 20) / imgHeight
+    );
+    
+    const finalWidth = imgWidth * ratio;
+    const finalHeight = imgHeight * ratio;
+    
+    // Jika terlalu tinggi untuk satu halaman, bagi menjadi beberapa halaman
+    if (finalHeight > pdfHeight - 20) {
+      let position = 10;
+      let heightRemaining = finalHeight;
+      
+      while (heightRemaining > 0) {
+        if (position > 10) {
+          pdf.addPage();
+        }
+        
+        const pageHeight = Math.min(heightRemaining, pdfHeight - 20);
+        pdf.addImage(
+          imgData, 
+          'PNG', 
+          (pdfWidth - finalWidth) / 2, 
+          position, 
+          finalWidth, 
+          pageHeight
+        );
+        
+        position += pageHeight;
+        heightRemaining -= pageHeight;
+      }
+    } else {
+      // Fit dalam satu halaman
+      pdf.addImage(
+        imgData, 
+        'PNG', 
+        (pdfWidth - finalWidth) / 2, 
+        10, 
+        finalWidth, 
+        finalHeight
+      );
+    }
+    
+    pdf.save(`bagan-organisasi-${new Date().toISOString().split('T')[0]}.pdf`);
+  } catch (error) {
+    console.error('Error export PDF:', error);
+    alert('Terjadi kesalahan saat export PDF');
+  } finally {
+    chartElement.style.width = originalWidth;
+    loading.classList.remove('active');
+  }
+}
+// ============================================================
+// PENGUKUR TINGGI TEKS
+// Dipakai untuk: (1) menyamakan tinggi kotak jabatan Klaster & Sub
+// Klaster mengikuti jabatan terpanjang di seluruh bagan, dan
+// (2) menghitung tinggi kotak Anggota yang namanya boleh wrap 2 baris.
+// ============================================================
+let _measurer = null;
+function getMeasurer() {
+  if (!_measurer) {
+    _measurer = document.createElement('div');
+    _measurer.style.position = 'fixed';
+    _measurer.style.visibility = 'hidden';
+    _measurer.style.pointerEvents = 'none';
+    _measurer.style.left = '-9999px';
+    _measurer.style.top = '0';
+    _measurer.style.boxSizing = 'border-box';
+    _measurer.style.fontFamily = 'Arial, Helvetica, sans-serif';
+    document.body.appendChild(_measurer);
+  }
+  return _measurer;
+}
+
+// Tinggi kotak "jabatan" (teks bold) kalau dirender pada lebar kotak 170px
+function measureJabatanHeight(text, fontSize) {
+  const m = getMeasurer();
+  m.style.width = '170px';
+  m.style.padding = '6px 6px';
+  m.style.fontSize = fontSize + 'px';
+  m.style.fontWeight = 'bold';
+  m.style.lineHeight = '1.25';
+  m.style.whiteSpace = 'normal';
+  m.style.wordBreak = 'break-word';
+  m.innerHTML = '';
+  m.textContent = text || '';
+  return m.offsetHeight;
+}
+
+// Tinggi daftar nama Anggota (tiap nama boleh wrap sampai 2 baris)
+function measureAnggotaListHeight(namaList) {
+  const m = getMeasurer();
+  m.style.width = '170px';
+  m.style.padding = '6px 8px';
+  m.style.fontSize = '11px';
+  m.style.fontWeight = 'normal';
+  m.style.lineHeight = '16px';
+  m.style.whiteSpace = 'normal';
+  m.style.wordBreak = 'break-word';
+  m.innerHTML = namaList.map(n => `<div>${n}</div>`).join('');
+  const h = m.offsetHeight;
+  m.innerHTML = '';
+  return h;
+}
+
+// ============================================================
+// RENDER BAGAN
+// ============================================================
+function render() {
+  const container = document.getElementById('chartContainer');
+  
+  let html = `<div class="chart-title" onclick="openHeaderModal()" title="Klik untuk edit judul, subtitle, dan tahun">${data.title}<br>${data.subtitle}${data.tahun ? '<br>' + data.tahun : ''}</div>`;
+
+  const rootWarna = data.root.warna || "#2E86AB";
+  const jumlahKlaster = data.klaster.length;
+  const lebarKotak = 170;
+  const gap = 40;
+
+  // Tinggi kotak jabatan Root dihitung sendiri (tidak digabung dengan Klaster/Sub Klaster)
+  const ROOT_JABATAN_H = Math.max(34, measureJabatanHeight(data.root.jabatan, 14));
+
+  // ----- Tinggi kotak jabatan Klaster & Sub Klaster (SERAGAM, gabung satu level) -----
+  // Diambil dari jabatan terpanjang di antara SEMUA Klaster & SEMUA Sub Klaster di seluruh bagan.
+  let JABATAN_H = 34;
+  data.klaster.forEach(k => {
+    JABATAN_H = Math.max(JABATAN_H, measureJabatanHeight(k.nama, 14));
+    k.sub.forEach(s => {
+      JABATAN_H = Math.max(JABATAN_H, measureJabatanHeight(s.nama, 12));
+    });
+  });
+  const KLASTER_NAMA_H = 34;
+  const SUB_NAMA_H = 30;
+  const KLASTER_BOX_H = JABATAN_H + KLASTER_NAMA_H + 2; // +2 = border atas & bawah kotak
+  const SUB_BOX_H = JABATAN_H + SUB_NAMA_H + 2;
+  const GARIS_START = 30 + KLASTER_BOX_H; // 30 = tinggi connector-vertical di bawah Root
+
+  html += `<div style="display: flex; flex-direction: column; align-items: center; width: 100%;">`;
+
+  html += `<div class="box" onclick="openModal('root', null, null)">
+    <div class="jabatan" style="background:${rootWarna}; height:${ROOT_JABATAN_H}px;">${data.root.jabatan}</div>
+    <div class="nama">${data.root.nama}</div>
+    <div class="box-actions">
+      <button class="btn-edit" onclick="event.stopPropagation(); openModal('root', null, null)" title="Edit">✎</button>
+    </div>
+  </div>`;
+
+  html += `<div class="connector-vertical"></div>`;
+
+  const lebarGarisHorizontal = jumlahKlaster > 1 ? (jumlahKlaster - 1) * (lebarKotak + gap) : 0;
+
+  html += `<div style="display: flex; gap: ${gap}px; position: relative; padding-top: 0;">`;
+  
+  if (jumlahKlaster > 1) {
+    html += `<div style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: ${lebarGarisHorizontal}px; height: 1px; background: #555;"></div>`;
+  }
+
+  data.klaster.forEach((klaster) => {
+    const subCount = klaster.sub.length;
+    const warnaKlaster = klaster.warna || "#1D9E75";
+
+    // ----- Hitung posisi tiap sub klaster secara dinamis -----
+    // Slot dasar tiap sub = tinggi kotak sub (SUB_BOX_H) + jarak 20px.
+    // Kalau sub itu punya anggota, slotnya ditambah ruang untuk garis komando + kotak Anggota
+    // (tingginya diukur langsung dari nama-nama yang sudah diberi nomor, karena boleh wrap 2 baris),
+    // supaya sub klaster berikutnya tidak nabrak/tumpang tindih.
+    const ANGGOTA_HEADER = 24; // tinggi label "Anggota"
+    const CMD_LINE = 20;       // panjang garis komando dari Sub Klaster ke Anggota
+    const GAP_AFTER = 20;      // jarak setelah kotak Anggota, sebelum sub berikutnya
+
+    let cursorTop = GARIS_START + 29; // posisi top untuk sub pertama
+    const posisiSub = [];
+
+    klaster.sub.forEach((sub) => {
+      const daftarAnggotaNomor = (sub.anggota || []).map((n, i) => `${i + 1}. ${n}`);
+      const jumlahAnggota = daftarAnggotaNomor.length;
+      const topPos = cursorTop;
+      const topGaris = topPos + Math.round(SUB_BOX_H / 2); // titik tengah kotak sub, tempat garis koordinatif menyambung
+
+      let anggotaTop = null;
+      let anggotaBoxHeight = 0;
+      if (jumlahAnggota > 0) {
+        anggotaBoxHeight = ANGGOTA_HEADER + measureAnggotaListHeight(daftarAnggotaNomor) + 2;
+        anggotaTop = topPos + SUB_BOX_H + CMD_LINE;
+      }
+
+      const slotHeight = jumlahAnggota > 0
+        ? (SUB_BOX_H + CMD_LINE + anggotaBoxHeight + GAP_AFTER)
+        : (SUB_BOX_H + GAP_AFTER);
+
+      posisiSub.push({ topPos, topGaris, anggotaTop, anggotaBoxHeight, jumlahAnggota, daftarAnggotaNomor });
+      cursorTop += slotHeight;
+    });
+
+    // Tinggi minimum cabang dihitung eksplisit (bukan mengandalkan margin tombol +Sub yang hanya
+    // muncul saat hover) supaya html2canvas ikut menangkap seluruh sub klaster (+ anggota) saat export.
+    // Pakai min-height (bukan height) supaya area hover tetap bisa melebar saat tombol +Sub
+    // muncul, jadi tombolnya tidak langsung hilang saat kursor menuju ke arah tombol.
+    const branchHeight = subCount > 0 ? cursorTop : (GARIS_START + 20);
+
+    html += `<div class="branch" data-klaster-id="${klaster.id}" style="position: relative; width: ${lebarKotak}px; min-height: ${branchHeight}px; display: flex; flex-direction: column; align-items: center;">`;
+    
+    html += `<div class="connector-vertical"></div>`;
+    
+    html += `<div class="box klaster" onclick="openModal('klaster', ${klaster.id}, null)">
+      <div class="jabatan" style="background:${warnaKlaster}; height:${JABATAN_H}px;">${klaster.nama}</div>
+      <div class="nama">${klaster.kepala}</div>
+      <div class="box-actions">
+        <button class="btn-edit" onclick="event.stopPropagation(); openModal('klaster', ${klaster.id}, null)" title="Edit">✎</button>
+        <button class="btn-delete" onclick="event.stopPropagation(); deleteKlaster(${klaster.id})" title="Hapus">×</button>
+      </div>
+    </div>`;
+
+    if (subCount > 0) {
+      // Garis koordinatif utama: dari Klaster turun sampai ke titik tengah kotak sub TERAKHIR
+      const lastSub = posisiSub[posisiSub.length - 1];
+      const tinggiGaris = lastSub.topGaris - GARIS_START;
+      html += `<div style="position: absolute; left: 17px; top: ${GARIS_START}px; width: 1px; height: ${tinggiGaris}px; background: #555;"></div>`;
+
+      klaster.sub.forEach((sub, idx) => {
+        const { topPos, topGaris, anggotaTop, jumlahAnggota } = posisiSub[idx];
+        const warnaSub = sub.warna || "#7FD9BB";
+
+        // Garis koordinatif pendek dari SAMPING kotak sub (bukan dari atas)
+        html += `<div style="position: absolute; left: 17px; top: ${topGaris}px; width: 17px; height: 1px; background: #555;"></div>`;
+
+        html += `<div class="box sub" onclick="openModal('sub', ${klaster.id}, ${idx})" style="position: absolute; left: 34px; top: ${topPos}px; width: 170px;">
+          <div class="jabatan" style="background:${warnaSub}; height:${JABATAN_H}px;">${sub.nama}</div>
+          <div class="nama">${sub.kepala}</div>
+          <div class="box-actions">
+            <button class="btn-edit" onclick="event.stopPropagation(); openModal('sub', ${klaster.id}, ${idx})" title="Edit">✎</button>
+            <button class="btn-delete" onclick="event.stopPropagation(); deleteSub(${klaster.id}, ${idx})" title="Hapus">×</button>
+          </div>
+        </div>`;
+
+        // Anggota (opsional): garis KOMANDO lurus dari tengah-bawah kotak sub, karena PJ memimpin anggotanya
+        if (jumlahAnggota > 0) {
+          const subCenterX = 34 + 85; // titik tengah horizontal kotak sub (lebar 170, left 34)
+          const cmdTop = topPos + SUB_BOX_H;
+          html += `<div style="position: absolute; left: ${subCenterX}px; top: ${cmdTop}px; width: 1px; height: 20px; background: #555;"></div>`;
+
+          const daftarNama = posisiSub[idx].daftarAnggotaNomor.map(n => `<div>${n}</div>`).join('');
+          html += `<div class="box anggota" onclick="openModal('sub', ${klaster.id}, ${idx})" style="position: absolute; left: 34px; top: ${anggotaTop}px; width: 170px;">
+            <div class="jabatan" style="background:#9AA0A6;">Anggota</div>
+            <div class="nama">${daftarNama}</div>
+          </div>`;
+        }
+      });
+    }
+
+    const subTop = subCount > 0 ? (cursorTop - GARIS_START + 10) : 10;
+    html += `<button class="btn-add-sub" onclick="addSub(${klaster.id})" style="margin-top: ${subTop}px; position: relative; z-index: 10;">+ Sub</button>`;
+
+    html += `</div>`;
+  });
+
+  html += `</div>`;
+  html += `</div>`;
+
+  container.innerHTML = html;
+}
+
+// ============================================================
+// MODAL POPUP
+// ============================================================
+function openModal(type, id, subIndex) {
+  modalTarget = { type, id, subIndex };
+  
+  const overlay = document.getElementById('modalOverlay');
+  const title = document.getElementById('modalTitle');
+  const inputJabatan = document.getElementById('editJabatan');
+  const inputNama = document.getElementById('editNama');
+  const inputWarna = document.getElementById('editWarna');
+  const labelJabatan = document.getElementById('labelJabatan');
+  const labelNama = document.getElementById('labelNama');
+  const groupAnggota = document.getElementById('groupAnggota');
+  const inputAnggota = document.getElementById('editAnggota');
+  
+  let targetData;
+  groupAnggota.style.display = 'none';
+  
+  if (type === 'root') {
+    targetData = data.root;
+    labelJabatan.textContent = "Jabatan";
+    labelNama.textContent = "Nama";
+    title.textContent = "✎ Edit Kepala Puskesmas";
+    inputJabatan.value = targetData.jabatan || '';
+    inputNama.value = targetData.nama || '';
+    inputWarna.value = targetData.warna || '#2E86AB';
+  } else if (type === 'klaster') {
+    const klaster = data.klaster.find(k => k.id === id);
+    targetData = klaster;
+    labelJabatan.textContent = "Jabatan";
+    labelNama.textContent = "Nama";
+    title.textContent = `✎ Edit ${klaster ? klaster.nama : 'Klaster'}`;
+    inputJabatan.value = targetData ? targetData.nama || '' : '';
+    inputNama.value = targetData ? targetData.kepala || '' : '';
+    inputWarna.value = targetData ? targetData.warna || '#1D9E75' : '#1D9E75';
+  } else if (type === 'sub') {
+    const klaster = data.klaster.find(k => k.id === id);
+    if (klaster && klaster.sub[subIndex]) {
+      targetData = klaster.sub[subIndex];
+      labelJabatan.textContent = "Jabatan";
+      labelNama.textContent = "Nama Penanggung Jawab";
+      title.textContent = `✎ Edit ${targetData.nama || 'Sub'}`;
+      inputJabatan.value = targetData.nama || '';
+      inputNama.value = targetData.kepala || '';
+      inputWarna.value = targetData.warna || '#7FD9BB';
+      groupAnggota.style.display = 'block';
+      inputAnggota.value = (targetData.anggota || []).join('\n');
+    }
+  }
+  
+  if (targetData) {
+    overlay.classList.add('active');
+  }
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('active');
+  modalTarget = null;
+}
+
+function openHeaderModal() {
+  document.getElementById('editHeaderTitle').value = data.title || '';
+  document.getElementById('editHeaderSubtitle').value = data.subtitle || '';
+  document.getElementById('editHeaderTahun').value = data.tahun || '';
+  document.getElementById('headerModalOverlay').classList.add('active');
+}
+
+function closeHeaderModal() {
+  document.getElementById('headerModalOverlay').classList.remove('active');
+}
+
+function saveHeaderModal() {
+  const title = document.getElementById('editHeaderTitle').value.trim();
+  const subtitle = document.getElementById('editHeaderSubtitle').value.trim();
+  const tahun = document.getElementById('editHeaderTahun').value.trim();
+
+  if (!title) {
+    alert('Judul harus diisi!');
+    return;
+  }
+
+  data.title = title;
+  data.subtitle = subtitle;
+  data.tahun = tahun;
+
+  closeHeaderModal();
+  render();
+}
+
+function saveModal() {
+  if (!modalTarget) return;
+  
+  const { type, id, subIndex } = modalTarget;
+  const jabatan = document.getElementById('editJabatan').value.trim();
+  const nama = document.getElementById('editNama').value.trim();
+  const warna = document.getElementById('editWarna').value;
+  
+  if (!jabatan || !nama) {
+    alert('Jabatan dan Nama harus diisi!');
+    return;
+  }
+  
+  if (type === 'root') {
+    data.root.jabatan = jabatan;
+    data.root.nama = nama;
+    data.root.warna = warna;
+  } else if (type === 'klaster') {
+    const klaster = data.klaster.find(k => k.id === id);
+    if (klaster) {
+      klaster.nama = jabatan;
+      klaster.kepala = nama;
+      klaster.warna = warna;
+    }
+  } else if (type === 'sub') {
+    const klaster = data.klaster.find(k => k.id === id);
+    if (klaster && klaster.sub[subIndex]) {
+      klaster.sub[subIndex].nama = jabatan;
+      klaster.sub[subIndex].kepala = nama;
+      klaster.sub[subIndex].warna = warna;
+      const anggotaRaw = document.getElementById('editAnggota').value;
+      klaster.sub[subIndex].anggota = anggotaRaw
+        .split('\n')
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+    }
+  }
+  
+  closeModal();
+  render();
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeModal();
+    closeHeaderModal();
+    closeExportOrient();
+    closeExportData();
+    closeImportData();
+  }
+});
+
+document.getElementById('modalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+document.getElementById('headerModalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeHeaderModal();
+});
+
+document.getElementById('exportOrientOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeExportOrient();
+});
+
+document.getElementById('exportDataOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeExportData();
+});
+
+document.getElementById('importDataOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeImportData();
+});
+
+// ============================================================
+// TAMBAH / HAPUS KLASTER & SUB
+// ============================================================
+function addKlaster() {
+  const newId = nextKlasterId++;
+  data.klaster.push({
+    id: newId,
+    nama: `Klaster ${data.klaster.length + 1}`,
+    kepala: "Nama",
+    warna: "#1D9E75",
+    sub: []
+  });
+  render();
+  toggleFabMenu();
+}
+
+function deleteKlaster(id) {
+  if (data.klaster.length <= 1) {
+    alert('Minimal harus ada 1 klaster!');
+    return;
+  }
+  if (!confirm('Hapus klaster ini dan semua sub-nya?')) return;
+  
+  data.klaster = data.klaster.filter(k => k.id !== id);
+  render();
+}
+
+function addSub(klasterId) {
+  const klaster = data.klaster.find(k => k.id === klasterId);
+  if (!klaster) return;
+
+  const newIndex = klaster.sub.length + 1;
+  
+  const warnaDefault = klaster.sub.length > 0 
+    ? klaster.sub[klaster.sub.length - 1].warna 
+    : "#7FD9BB";
+
+  klaster.sub.push({
+    nama: `Sub ${klaster.nama} ${newIndex}`,
+    kepala: "Nama",
+    warna: warnaDefault,
+    anggota: []
+  });
+  render();
+}
+
+function deleteSub(klasterId, subIndex) {
+  const klaster = data.klaster.find(k => k.id === klasterId);
+  if (!klaster) return;
+  
+  if (klaster.sub.length <= 1) {
+    alert('Minimal harus ada 1 sub!');
+    return;
+  }
+  if (!confirm('Hapus sub ini?')) return;
+  
+  klaster.sub.splice(subIndex, 1);
+  render();
+}
+
+// ============================================================
+// EXPORT / IMPORT / RESET
+// ============================================================
+function exportJSON() {
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'bagan-organisasi.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// EXPORT / IMPORT EXCEL & CSV
+// ============================================================
+// Struktur berjenjang (Klaster > Sub Klaster > Anggota) diratakan jadi tabel:
+// satu baris = satu kombinasi Klaster + Sub Klaster + Anggota.
+// Kalau Sub Klaster tidak punya anggota, tetap 1 baris dengan kolom Anggota kosong.
+function exportExcel() {
+  const rows = [];
+
+  data.klaster.forEach(k => {
+    if (k.sub.length === 0) {
+      rows.push({
+        'Klaster': k.nama,
+        'Kepala Klaster': k.kepala,
+        'Warna Klaster': k.warna || '',
+        'Sub Klaster': '',
+        'Penanggung Jawab': '',
+        'Warna Sub': '',
+        'Anggota': ''
+      });
+      return;
+    }
+    k.sub.forEach(s => {
+      const daftarAnggota = (s.anggota && s.anggota.length > 0) ? s.anggota : [''];
+      daftarAnggota.forEach(a => {
+        rows.push({
+          'Klaster': k.nama,
+          'Kepala Klaster': k.kepala,
+          'Warna Klaster': k.warna || '',
+          'Sub Klaster': s.nama,
+          'Penanggung Jawab': s.kepala,
+          'Warna Sub': s.warna || '',
+          'Anggota': a
+        });
+      });
+    });
+  });
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [
+    { wch: 18 }, { wch: 16 }, { wch: 12 },
+    { wch: 30 }, { wch: 18 }, { wch: 12 }, { wch: 18 }
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Bagan Organisasi');
+  XLSX.writeFile(wb, `bagan-organisasi-${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+function handleImportExcel(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+      if (rows.length === 0) {
+        alert('File kosong atau formatnya tidak sesuai.');
+        return;
+      }
+
+      // Cocokkan nama Klaster/Sub Klaster tanpa peduli huruf besar/kecil & spasi berlebih,
+      // supaya salah ketik kecil (mis. "sub Klaster 2.1" vs "Sub klaster 2.1") tetap dianggap sama.
+      const norm = (s) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
+      const getVal = (row, name) => {
+        const key = Object.keys(row).find(k => k.trim().toLowerCase() === name.toLowerCase());
+        return key ? String(row[key]).trim() : '';
+      };
+
+      const klasterMap = new Map();
+      const klasterOrder = [];
+
+      rows.forEach(row => {
+        const klasterNama = getVal(row, 'Klaster');
+        if (!klasterNama) return;
+
+        const kKey = norm(klasterNama);
+        let entry = klasterMap.get(kKey);
+        if (!entry) {
+          entry = {
+            obj: {
+              nama: klasterNama,
+              kepala: getVal(row, 'Kepala Klaster') || 'Nama',
+              warna: getVal(row, 'Warna Klaster') || '#1D9E75',
+              sub: []
+            },
+            subMap: new Map()
+          };
+          klasterMap.set(kKey, entry);
+          klasterOrder.push(kKey);
+        }
+
+        const subNama = getVal(row, 'Sub Klaster');
+        if (subNama) {
+          const sKey = norm(subNama);
+          let subEntry = entry.subMap.get(sKey);
+          if (!subEntry) {
+            subEntry = {
+              nama: subNama,
+              kepala: getVal(row, 'Penanggung Jawab') || 'Nama',
+              warna: getVal(row, 'Warna Sub') || '#7FD9BB',
+              anggota: []
+            };
+            entry.subMap.set(sKey, subEntry);
+            entry.obj.sub.push(subEntry);
+          }
+          const anggotaNama = getVal(row, 'Anggota');
+          if (anggotaNama) subEntry.anggota.push(anggotaNama);
+        }
+      });
+
+      if (klasterMap.size === 0) {
+        alert('Tidak ada data Klaster yang terbaca. Pastikan kolom "Klaster" terisi.');
+        return;
+      }
+
+      let idCounter = 1;
+      const newKlaster = klasterOrder.map(key => {
+        const k = klasterMap.get(key).obj;
+        k.id = idCounter++;
+        return k;
+      });
+
+      // Sesuai kesepakatan: import Excel/CSV menimpa total Klaster/Sub/Anggota yang ada.
+      // Judul bagan & Kepala Puskesmas (root) tidak ikut diubah oleh file ini.
+      data.klaster = newKlaster;
+      nextKlasterId = idCounter;
+      render();
+      alert(`Data berhasil diimport dari Excel/CSV! (${newKlaster.length} klaster)`);
+    } catch (err) {
+      alert('Error membaca file: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  event.target.value = '';
+}
+
+function handleImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const imported = JSON.parse(e.target.result);
+      if (imported.root && imported.klaster) {
+        data = imported;
+        render();
+        alert('Data berhasil diimport!');
+      } else {
+        alert('Format JSON tidak valid!');
+      }
+    } catch (err) {
+      alert('Error membaca file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function resetData() {
+  if (!confirm('Reset ke data default (Master Bagan Organisasi)?')) return;
+  
+  data = {
+    title: "Bagan Organisasi Puskesmas Kedawung",
+    subtitle: "Kabupaten Cirebon",
+    tahun: "Tahun 2026",
+    root: { jabatan: "KEPALA PUSKESMAS", nama: "Nama Kapus", warna: "#e6f425" },
+    klaster: [
+      { nama: "KLASTER MANAJEMEN", kepala: "Nama", warna: "#f7fb2d", sub: [{ nama: "Manajemen Inti", kepala: "Nama", warna: "#f7fb2d", anggota: [] }], id: 1 },
+      { nama: "KLASTER IBU DAN ANAK", kepala: "Nama", warna: "#f4511a", sub: [{ nama: "Ibu Hamil, Bersalin, Nifas", kepala: "Nama", warna: "#f4511a", anggota: [] }], id: 2 },
+      { nama: "KLASTER USIA DEWASA DAN LANSIA", kepala: "Nama", warna: "#05d9f5", sub: [{ nama: "Usia Dewasa", kepala: "Nama", warna: "#05d9f5", anggota: [] }], id: 3 },
+      { nama: "KLASTER PENANGGULANGAN PENYAKIT MENULAR", kepala: "Nama", warna: "#13dd2b", sub: [{ nama: "Kesehatan Lingkungan", kepala: "Nama", warna: "#13dd2b", anggota: [] }], id: 4 },
+      { nama: "Lintas Klaster", kepala: "Nama", warna: "#90f9d8", sub: [{ nama: "Pelayanan Kesehatan Gigi dan Mulut", kepala: "Nama", warna: "#90f9d8", anggota: [] }], id: 5 }
+    ]
+  };
+  nextKlasterId = 6;
+  render();
+  toggleFabMenu();
+}
+
+// ============================================================
+// INIT & RESIZE
+// ============================================================
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(render, 250);
+});
+
+render();
+</script>
+
+</body>
+</html>
